@@ -1,0 +1,474 @@
+openapi: 3.0.3
+info:
+  title: Signal API
+  version: 1.0.0
+  description: >
+    Feature-request board API (v1). Auth is JWT-based (HS256, 7-day expiry) and
+    is accepted either as an `Authorization: Bearer <token>` header or as an
+    httpOnly cookie (`signal_token`) set by register/login. Logout clears the
+    cookie; JWT bearer tokens remain valid until expiry (stateless design).
+
+    Base URLs:
+    - Development: `http://localhost:3001`
+    - Production: served under the same origin as the frontend at `/api` (see
+      backend README — proxy `/api` to the API process on a private port).
+
+    Conventions:
+    - Collections are wrapped: `{ workspaces: [...] }`, `{ boards: [...] }`, etc.
+    - Errors are always `{ "error": string, "field"?: string }`.
+    - On register, a personal workspace named "My Workspace" is auto-created and
+      the user is added as owner (so GET /api/workspaces is never empty).
+    - All endpoints under /api/workspaces, /api/boards, /api/posts require auth.
+    - Non-members get 404 (not 403) so workspace/board/post existence is not leaked.
+servers:
+  - url: http://localhost:3001
+    description: Local development
+tags:
+  - name: auth
+  - name: workspaces
+  - name: boards
+  - name: posts
+  - name: comments
+paths:
+  /api/health:
+    get:
+      tags: [auth]
+      summary: Liveness check
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  service: { type: string, example: signal-api }
+
+  /api/auth/register:
+    post:
+      tags: [auth]
+      summary: Create an account (auto-provisions a personal workspace)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email, example: ada@example.com }
+                password: { type: string, minLength: 8, maxLength: 200 }
+                name: { type: string, maxLength: 100, nullable: true }
+      responses:
+        "201":
+          description: Account created
+          headers:
+            Set-Cookie:
+              description: httpOnly `signal_token` cookie
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user, token]
+                properties:
+                  user: { $ref: "#/components/schemas/User" }
+                  token: { type: string, description: JWT (also set as httpOnly cookie) }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: Email already registered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/auth/login:
+    post:
+      tags: [auth]
+      summary: Log in with email + password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        "200":
+          description: Logged in
+          headers:
+            Set-Cookie:
+              description: httpOnly `signal_token` cookie
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user, token]
+                properties:
+                  user: { $ref: "#/components/schemas/User" }
+                  token: { type: string }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: Invalid email or password
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/auth/logout:
+    post:
+      tags: [auth]
+      summary: Clear the session cookie (stateless — bearer tokens stay valid)
+      responses:
+        "204":
+          description: Cookie cleared
+
+  /api/auth/me:
+    get:
+      tags: [auth]
+      security: [{ bearerAuth: [], cookieAuth: [] }]
+      summary: Current user
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: "#/components/schemas/User" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/workspaces:
+    get:
+      tags: [workspaces]
+      security: [{ bearerAuth: [], cookieAuth: [] }]
+      summary: Workspaces the current user belongs to (newest first)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  workspaces:
+                    type: array
+                    items: { $ref: "#/components/schemas/Workspace" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [workspaces]
+      security: [{ bearerAuth: [], cookieAuth: [] }]
+      summary: Create a workspace and join it as owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 100 }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  workspace: { $ref: "#/components/schemas/Workspace" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/workspaces/{workspaceId}/boards:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+    get:
+      tags: [boards]
+      security: [{ bearerAuth: [], cookieAuth: [] }]
+      summary: Boards in a workspace (newest first, with post counts)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  boards:
+                    type: array
+                    items: { $ref: "#/components/schemas/Board" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [boards]
+      security: [{ bearerAuth: [], cookieAuth: [] }]
+      summary: Create a board in a workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 100 }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  board: { $ref: "#/components/schemas/Board" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/boards/{boardId}/posts:
+    parameters:
+      - $ref: "#/components/parameters/BoardId"
+    get:
+      tags: [posts]
+      security: [{ bearerAuth: [], cookieAuth: [] }]
+      summary: >
+        Posts on a board, sorted by vote count descending (then newest first).
+        `viewerVoted` reflects whether the authenticated user has voted.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  posts:
+                    type: array
+                    items: { $ref: "#/components/schemas/Post" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [posts]
+      security: [{ bearerAuth: [], cookieAuth: [] }]
+      summary: Create a feature-request post on a board
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 200 }
+                description: { type: string, maxLength: 5000, nullable: true }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  post: { $ref: "#/components/schemas/Post" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/posts/{postId}/vote:
+    parameters:
+      - $ref: "#/components/parameters/PostId"
+    post:
+      tags: [posts]
+      security: [{ bearerAuth: [], cookieAuth: [] }]
+      summary: Toggle the current user's upvote on a post
+      responses:
+        "200":
+          description: Toggled
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [postId, voted, voteCount]
+                properties:
+                  postId: { type: string }
+                  voted: { type: boolean, description: true = just upvoted, false = removed }
+                  voteCount: { type: integer, description: total votes after toggle }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/posts/{postId}/comments:
+    parameters:
+      - $ref: "#/components/parameters/PostId"
+    get:
+      tags: [comments]
+      security: [{ bearerAuth: [], cookieAuth: [] }]
+      summary: Comments on a post (flat list, oldest first)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  comments:
+                    type: array
+                    items: { $ref: "#/components/schemas/Comment" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [comments]
+      security: [{ bearerAuth: [], cookieAuth: [] }]
+      summary: Comment on a post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  comment: { $ref: "#/components/schemas/Comment" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: signal_token
+  parameters:
+    WorkspaceId:
+      name: workspaceId
+      in: path
+      required: true
+      schema: { type: string }
+    BoardId:
+      name: boardId
+      in: path
+      required: true
+      schema: { type: string }
+    PostId:
+      name: postId
+      in: path
+      required: true
+      schema: { type: string }
+  responses:
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing or invalid credentials
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Not found (or you are not a member)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        field: { type: string, nullable: true }
+    User:
+      type: object
+      required: [id, email, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        name: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+    Workspace:
+      type: object
+      required: [id, name, role, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        role: { type: string, enum: [owner, member], description: current user's role }
+        createdAt: { type: string, format: date-time }
+    Board:
+      type: object
+      required: [id, workspaceId, name, postCount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid }
+        name: { type: string }
+        postCount: { type: integer, description: number of posts on the board }
+        createdAt: { type: string, format: date-time }
+    Author:
+      type: object
+      required: [id, email]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, nullable: true }
+        email: { type: string, format: email }
+    Post:
+      type: object
+      required: [id, boardId, title, createdAt, author, voteCount, viewerVoted]
+      properties:
+        id: { type: string, format: uuid }
+        boardId: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        author: { $ref: "#/components/schemas/Author" }
+        voteCount: { type: integer }
+        viewerVoted: { type: boolean, description: has the current user upvoted? }
+    Comment:
+      type: object
+      required: [id, postId, body, createdAt, author]
+      properties:
+        id: { type: string, format: uuid }
+        postId: { type: string, format: uuid }
+        body: { type: string }
+        createdAt: { type: string, format: date-time }
+        author: { $ref: "#/components/schemas/Author" }
