@@ -3,17 +3,18 @@ import type { Board, Comment, Post, User, Workspace } from './types'
 /**
  * API client for the Signal backend (Bun + Hono).
  *
- * Built against the contract in /home/team/shared/SPEC.md:
- *   POST /api/auth/register | login | logout
- *   GET|POST /api/workspaces
- *   GET|POST /api/workspaces/:id/boards
- *   GET|POST /api/boards/:id/posts
- *   POST /api/posts/:id/vote        (toggle)
- *   GET|POST /api/posts/:id/comments
+ * Built against the published contract — source of truth:
+ *   /home/team/shared/openapi.yaml  (see also API_CONTRACT.md)
  *
- * The backend owns the final OpenAPI contract; this client is written to be
- * tolerant of small shape differences so the two halves can land in any order.
- * Auth uses cookies (`credentials: 'include'`), so no token storage is needed.
+ * Contract conventions implemented here:
+ *   - Collections are wrapped: `{ workspaces: [] }`, `{ boards: [] }`, etc.
+ *     (unwrapped transparently so callers get plain arrays).
+ *   - register/login return `{ user, token }` — the token is also set as the
+ *     httpOnly `signal_token` cookie, so we keep `credentials: 'include'` and
+ *     surface `user` to callers.
+ *   - `GET /api/auth/me` returns `{ user }` (401 = signed out).
+ *   - Vote toggle returns `{ postId, voted, voteCount }` (see normalizeVoteResult).
+ *   - Errors are `{ error, field? }`.
  */
 
 const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api'
@@ -86,50 +87,79 @@ export interface CreatePostInput {
   description: string
 }
 
+/** Contract shape for the vote toggle: `{ postId, voted, voteCount }`. */
+export interface VoteResponse {
+  postId: string
+  voted: boolean
+  voteCount: number
+}
+
 export interface VoteResult {
   voteCount: number
-  userVoted: boolean
+  voted: boolean
 }
 
 /**
- * Normalize a vote-toggle response into { voteCount, userVoted }.
- * The backend may return the full post, an envelope { post }, or a bare
- * { voteCount, userVoted } — accept all three, falling back to the optimistic
- * value when the shape is unrecognized.
+ * Normalize a vote-toggle response into { voteCount, voted }.
+ * Accepts the contract shape { postId, voted, voteCount } plus two legacy
+ * shapes that may come from earlier backend iterations: the full post object
+ * ({ voteCount, viewerVoted }) and { voteCount, userVoted }. Falls back to the
+ * caller's optimistic value when the shape is unrecognized.
  */
 export function normalizeVoteResult(raw: unknown, fallback: VoteResult): VoteResult {
   if (raw && typeof raw === 'object') {
     const record = raw as Record<string, unknown>
     const source = (record.post as Record<string, unknown> | undefined) ?? record
     const voteCount = typeof source.voteCount === 'number' ? source.voteCount : undefined
-    const userVoted = typeof source.userVoted === 'boolean' ? source.userVoted : undefined
-    if (voteCount !== undefined && userVoted !== undefined) return { voteCount, userVoted }
+    const voted =
+      typeof source.voted === 'boolean'
+        ? source.voted
+        : typeof source.viewerVoted === 'boolean'
+          ? source.viewerVoted
+          : typeof source.userVoted === 'boolean'
+            ? source.userVoted
+            : undefined
+    if (voteCount !== undefined && voted !== undefined) return { voteCount, voted }
   }
   return fallback
 }
 
 export const api = {
-  register: (input: AuthPayload) => request<User>('/auth/register', { method: 'POST', body: input }),
-  login: (input: AuthPayload) => request<User>('/auth/login', { method: 'POST', body: input }),
+  register: async (input: AuthPayload) =>
+    (await request<{ user: User }>('/auth/register', { method: 'POST', body: input })).user,
+  login: async (input: AuthPayload) =>
+    (await request<{ user: User }>('/auth/login', { method: 'POST', body: input })).user,
   logout: () => request<void>('/auth/logout', { method: 'POST' }),
-  me: () => request<User>('/auth/me'),
+  me: async () => (await request<{ user: User }>('/auth/me')).user,
 
-  listWorkspaces: () => request<Workspace[]>('/workspaces'),
-  createWorkspace: (name: string) => request<Workspace>('/workspaces', { method: 'POST', body: { name } }),
+  listWorkspaces: async () => (await request<{ workspaces: Workspace[] }>('/workspaces')).workspaces,
+  createWorkspace: async (name: string) =>
+    (await request<{ workspace: Workspace }>('/workspaces', { method: 'POST', body: { name } }))
+      .workspace,
 
-  listBoards: (workspaceId: string) => request<Board[]>(`/workspaces/${workspaceId}/boards`),
-  createBoard: (workspaceId: string, input: { name: string; description?: string }) =>
-    request<Board>(`/workspaces/${workspaceId}/boards`, { method: 'POST', body: input }),
+  listBoards: async (workspaceId: string) =>
+    (await request<{ boards: Board[] }>(`/workspaces/${workspaceId}/boards`)).boards,
+  createBoard: async (workspaceId: string, input: { name: string }) =>
+    (await request<{ board: Board }>(`/workspaces/${workspaceId}/boards`, {
+      method: 'POST',
+      body: input,
+    })).board,
 
-  listPosts: (boardId: string) => request<Post[]>(`/boards/${boardId}/posts`),
-  createPost: (boardId: string, input: CreatePostInput) =>
-    request<Post>(`/boards/${boardId}/posts`, { method: 'POST', body: input }),
+  listPosts: async (boardId: string) =>
+    (await request<{ posts: Post[] }>(`/boards/${boardId}/posts`)).posts,
+  createPost: async (boardId: string, input: CreatePostInput) =>
+    (await request<{ post: Post }>(`/boards/${boardId}/posts`, { method: 'POST', body: input }))
+      .post,
 
-  vote: (postId: string) => request<unknown>(`/posts/${postId}/vote`, { method: 'POST' }),
+  vote: (postId: string) => request<VoteResponse>(`/posts/${postId}/vote`, { method: 'POST' }),
 
-  listComments: (postId: string) => request<Comment[]>(`/posts/${postId}/comments`),
-  addComment: (postId: string, body: string) =>
-    request<Comment>(`/posts/${postId}/comments`, { method: 'POST', body: { body } }),
+  listComments: async (postId: string) =>
+    (await request<{ comments: Comment[] }>(`/posts/${postId}/comments`)).comments,
+  addComment: async (postId: string, body: string) =>
+    (await request<{ comment: Comment }>(`/posts/${postId}/comments`, {
+      method: 'POST',
+      body: { body },
+    })).comment,
 }
 
 export function errorMessage(error: unknown): string {

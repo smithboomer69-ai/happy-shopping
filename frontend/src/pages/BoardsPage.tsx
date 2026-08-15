@@ -19,16 +19,14 @@ export function BoardsPage() {
     queryFn: () => api.listBoards(workspaceId),
   })
   const createBoard = useMutation({
-    mutationFn: (input: { name: string; description?: string }) => api.createBoard(workspaceId, input),
+    mutationFn: (input: { name: string }) => api.createBoard(workspaceId, input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['boards', workspaceId] })
       setName('')
-      setDescription('')
     },
   })
 
   const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
@@ -36,7 +34,7 @@ export function BoardsPage() {
     if (!name.trim()) return
     setError(null)
     try {
-      await createBoard.mutateAsync({ name: name.trim(), description: description.trim() })
+      await createBoard.mutateAsync({ name: name.trim() })
     } catch (err) {
       setError(errorMessage(err))
     }
@@ -65,20 +63,6 @@ export function BoardsPage() {
             value={name}
             onChange={(event) => setName(event.target.value)}
             maxLength={80}
-          />
-        </div>
-        <div className="form-field">
-          <label className="form-field__label" htmlFor="board-description">
-            Description <span className="optional">(optional)</span>
-          </label>
-          <input
-            id="board-description"
-            className="input"
-            type="text"
-            placeholder="What is this board for?"
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            maxLength={200}
           />
         </div>
         {error ? (
@@ -116,7 +100,11 @@ export function BoardsPage() {
             <li key={board.id}>
               <Link to={`/workspaces/${workspaceId}/boards/${board.id}`} className="card card-link">
                 <h2 className="card-link__title">{board.name}</h2>
-                {board.description ? <p className="card-link__meta">{board.description}</p> : null}
+                {typeof board.postCount === 'number' ? (
+                  <p className="card-link__meta">
+                    {board.postCount} post{board.postCount === 1 ? '' : 's'}
+                  </p>
+                ) : null}
                 {board.createdAt ? (
                   <p className="card-link__meta">Created {formatDate(board.createdAt)}</p>
                 ) : null}

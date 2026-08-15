@@ -16,7 +16,7 @@ export function PostCard({ post, detailPath, onToggleVote, voteBusy = false }: P
       <div className="post-card__vote">
         <UpvoteButton
           voteCount={post.voteCount}
-          voted={post.userVoted}
+          voted={post.viewerVoted}
           busy={voteBusy}
           onToggle={() => onToggleVote(post.id)}
         />

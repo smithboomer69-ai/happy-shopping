@@ -78,7 +78,7 @@ export function PostPage() {
             <div className="post-detail__vote">
               <UpvoteButton
                 voteCount={post.voteCount}
-                voted={post.userVoted}
+                voted={post.viewerVoted}
                 busy={voteMutation.isPending && voteMutation.variables === post.id}
                 onToggle={() => voteMutation.mutate(post.id)}
               />

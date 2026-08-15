@@ -11,9 +11,9 @@ const post: Post = {
   title: 'Dark mode',
   description: 'Please add a dark theme.',
   voteCount: 4,
-  userVoted: false,
+  viewerVoted: false,
   createdAt: '2026-08-01T10:00:00Z',
-  author: { id: 'u1', email: 'ada@example.com' },
+  author: { id: 'u1', name: null, email: 'ada@example.com' },
 }
 
 function renderCard(props: Partial<React.ComponentProps<typeof PostCard>> = {}) {
@@ -55,7 +55,7 @@ describe('PostCard', () => {
   })
 
   it('marks the upvote button as pressed when the user already voted', () => {
-    renderCard({ post: { ...post, userVoted: true, voteCount: 5 } })
+    renderCard({ post: { ...post, viewerVoted: true, voteCount: 5 } })
     expect(screen.getByRole('button', { name: /^remove upvote/i })).toHaveAttribute(
       'aria-pressed',
       'true',

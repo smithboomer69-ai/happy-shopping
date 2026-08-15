@@ -16,12 +16,17 @@ bun run dev        # Vite dev server on http://localhost:5173
 ```
 
 The dev server proxies `/api/*` to the backend. By default it targets
-`http://localhost:8787`; point `DEV_API_PROXY_TARGET` at the backend's actual
-port in a local `.env` (see `.env.example`).
+`http://localhost:3001` (per the published OpenAPI contract); point
+`DEV_API_PROXY_TARGET` at the backend's actual port in a local `.env` (see
+`.env.example`).
 
 ## API contract
 
-The client (`src/lib/api.ts`) is built against the contract in `SPEC.md`:
+The client (`src/lib/api.ts`) is built against the published contract
+(`/home/team/shared/openapi.yaml`, summarized in `API_CONTRACT.md`).
+Collections are wrapped (`{ workspaces: [...] }`, …) and unwrapped by the
+client; register/login/me surface `user`; vote toggles return
+`{ postId, voted, voteCount }`; posts carry `viewerVoted` (current user's vote).
 
 | Method | Path                          | Purpose                  |
 | ------ | ----------------------------- | ------------------------ |

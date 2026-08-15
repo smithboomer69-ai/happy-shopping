@@ -1,12 +1,14 @@
 export interface User {
   id: string
   email: string
+  name?: string | null
   createdAt?: string
 }
 
 export interface Workspace {
   id: string
   name: string
+  role?: 'owner' | 'member'
   createdAt?: string
 }
 
@@ -14,12 +16,13 @@ export interface Board {
   id: string
   workspaceId: string
   name: string
-  description?: string
+  postCount?: number
   createdAt?: string
 }
 
-export interface PostAuthor {
+export interface Author {
   id: string
+  name?: string | null
   email: string
 }
 
@@ -27,11 +30,11 @@ export interface Post {
   id: string
   boardId: string
   title: string
-  description: string
+  description: string | null
   voteCount: number
-  userVoted: boolean
+  viewerVoted: boolean
   createdAt?: string
-  author?: PostAuthor
+  author?: Author
 }
 
 export interface Comment {
@@ -39,5 +42,5 @@ export interface Comment {
   postId: string
   body: string
   createdAt?: string
-  author?: PostAuthor
+  author?: Author
 }

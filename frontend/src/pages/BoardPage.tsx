@@ -63,11 +63,7 @@ export function BoardPage() {
 
       <header className="page-header">
         <h1 className="page-title">{boardQuery.data?.name ?? 'Board'}</h1>
-        {boardQuery.data?.description ? (
-          <p className="page-subtitle">{boardQuery.data.description}</p>
-        ) : (
-          <p className="page-subtitle">Feature requests, sorted by votes.</p>
-        )}
+        <p className="page-subtitle">Feature requests, sorted by votes.</p>
       </header>
 
       <NewPostForm onSubmit={handleCreatePost} submitting={createPost.isPending} error={postError} />

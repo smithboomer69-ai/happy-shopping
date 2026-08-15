@@ -17,8 +17,8 @@ export function usePostVote(boardId: string) {
           queryKey,
           previous.map((post) => {
             if (post.id !== postId) return post
-            const voteCount = post.voteCount + (post.userVoted ? -1 : 1)
-            return { ...post, voteCount, userVoted: !post.userVoted }
+            const voteCount = post.voteCount + (post.viewerVoted ? -1 : 1)
+            return { ...post, voteCount, viewerVoted: !post.viewerVoted }
           }),
         )
       }
@@ -32,7 +32,8 @@ export function usePostVote(boardId: string) {
         queryKey,
         current.map((post) => {
           if (post.id !== postId) return post
-          return { ...post, ...normalizeVoteResult(raw, { voteCount: post.voteCount, userVoted: post.userVoted }) }
+          const result = normalizeVoteResult(raw, { voteCount: post.voteCount, voted: post.viewerVoted })
+          return { ...post, voteCount: result.voteCount, viewerVoted: result.voted }
         }),
       )
     },
